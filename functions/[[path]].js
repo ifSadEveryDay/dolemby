@@ -158,13 +158,14 @@ export async function onRequest(context) {
       try {
         const text = await response.text();
         const targetOrigin = new URL(targetUrlStr).origin;
+        const targetHost = new URL(targetUrlStr).host;
         
         // 重写 HTML 中的链接，使其通过代理
         let rewrittenHtml = text;
         
         // 1. 重写绝对 URL (http:// 或 https://)
         rewrittenHtml = rewrittenHtml.replace(
-          /(href|src|action|data)=["'](https?:\/\/[^"']+)["']/gi,
+          /(href|src|action|data|poster|background)=["'](https?:\/\/[^"']+)["']/gi,
           (match, attr, originalUrl) => {
             return `${attr}="${url.origin}/${encodeURIComponent(originalUrl)}"`;
           }
@@ -172,7 +173,7 @@ export async function onRequest(context) {
         
         // 2. 重写协议相对 URL (//example.com)
         rewrittenHtml = rewrittenHtml.replace(
-          /(href|src|action|data)=["'](\/\/[^"']+)["']/gi,
+          /(href|src|action|data|poster|background)=["'](\/\/[^"']+)["']/gi,
           (match, attr, originalUrl) => {
             return `${attr}="${url.origin}/${encodeURIComponent('https:' + originalUrl)}"`;
           }
@@ -180,20 +181,71 @@ export async function onRequest(context) {
         
         // 3. 重写根相对路径 (/path/to/resource)
         rewrittenHtml = rewrittenHtml.replace(
-          /(href|src|action|data)=["'](\/[^/"'][^"']*)["']/gi,
+          /(href|src|action|data|poster|background)=["'](\/[^/"'][^"']*)["']/gi,
           (match, attr, path) => {
             const absoluteUrl = `${targetOrigin}${path}`;
             return `${attr}="${url.origin}/${encodeURIComponent(absoluteUrl)}"`;
           }
         );
         
-        // 4. 注入 base 标签，确保相对路径正确解析
-        if (!rewrittenHtml.includes('<base')) {
-          rewrittenHtml = rewrittenHtml.replace(
-            /<head>/i,
-            `<head>\n<base href="${url.origin}/${encodeURIComponent(targetOrigin)}/">`
-          );
-        }
+        // 4. 注入代理脚本，拦截动态请求
+        const proxyScript = `
+<script>
+(function() {
+  const originalFetch = window.fetch;
+  const originalXHROpen = XMLHttpRequest.prototype.open;
+  const proxyOrigin = '${url.origin}';
+  const targetOrigin = '${targetOrigin}';
+  
+  // 代理 fetch
+  window.fetch = function(url, options) {
+    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+      const absoluteUrl = url.startsWith('http') ? url : targetOrigin + url;
+      url = proxyOrigin + '/' + encodeURIComponent(absoluteUrl);
+    }
+    return originalFetch.call(this, url, options);
+  };
+  
+  // 代理 XMLHttpRequest
+  XMLHttpRequest.prototype.open = function(method, url, ...args) {
+    if (typeof url === 'string' && (url.startsWith('http') || url.startsWith('/'))) {
+      const absoluteUrl = url.startsWith('http') ? url : targetOrigin + url;
+      url = proxyOrigin + '/' + encodeURIComponent(absoluteUrl);
+    }
+    return originalXHROpen.call(this, method, url, ...args);
+  };
+  
+  // 代理 window.location
+  const originalLocation = window.location.href;
+  Object.defineProperty(window, 'location', {
+    get: function() {
+      return {
+        href: '${targetUrlStr}',
+        origin: '${targetOrigin}',
+        host: '${targetHost}',
+        hostname: '${new URL(targetUrlStr).hostname}',
+        protocol: '${new URL(targetUrlStr).protocol}',
+        pathname: '${new URL(targetUrlStr).pathname}',
+        search: '${new URL(targetUrlStr).search}',
+        hash: window.location.hash
+      };
+    },
+    set: function(value) {
+      if (value.startsWith('http')) {
+        window.location.href = proxyOrigin + '/' + encodeURIComponent(value);
+      } else {
+        window.location.href = value;
+      }
+    }
+  });
+})();
+</script>`;
+        
+        // 注入脚本到 head
+        rewrittenHtml = rewrittenHtml.replace(
+          /<head>/i,
+          `<head>${proxyScript}`
+        );
         
         body = rewrittenHtml;
       } catch (e) {

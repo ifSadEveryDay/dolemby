@@ -1,0 +1,16 @@
+{
+  "name": "emby-proxy-pages",
+  "version": "1.0.0",
+  "description": "Emby 反代服务 - Cloudflare Pages Functions",
+  "scripts": {
+    "dev": "wrangler pages dev public --compatibility-date=2024-12-01",
+    "deploy": "wrangler pages deploy public",
+    "tail": "wrangler pages deployment tail"
+  },
+  "keywords": ["emby", "proxy", "cloudflare", "pages"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

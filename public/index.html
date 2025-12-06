@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emby Proxy - Cloudflare Pages</title>
+  <meta name="description" content="Emby 流媒体反代服务，基于 Cloudflare Pages Functions">
+</head>
+<body>
+  <!-- 此文件为占位文件，实际内容由 functions/[[path]].js 处理 -->
+  <script>
+    // 自动重定向到根路径，由 Functions 处理
+    if (window.location.pathname === '/index.html') {
+      window.location.href = '/';
+    }
+  </script>
+</body>
+</html>

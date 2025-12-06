@@ -160,23 +160,40 @@ export async function onRequest(context) {
         const targetOrigin = new URL(targetUrlStr).origin;
         
         // 重写 HTML 中的链接，使其通过代理
-        const rewrittenHtml = text
-          // 重写绝对路径 href 和 src
-          .replace(/(href|src|action)=["']https?:\/\/[^"']+["']/gi, (match) => {
-            const urlMatch = match.match(/(href|src|action)=["'](https?:\/\/[^"']+)["']/i);
-            if (urlMatch) {
-              const attr = urlMatch[1];
-              const originalUrl = urlMatch[2];
-              return `${attr}="${url.origin}/${encodeURIComponent(originalUrl)}"`;
-            }
-            return match;
-          })
-          // 重写相对路径
-          .replace(/(href|src|action)=["']\/([^"']*)["']/gi, (match, attr, path) => {
-            if (path.startsWith('/')) return match; // 已经是绝对路径
-            const absoluteUrl = `${targetOrigin}/${path}`;
+        let rewrittenHtml = text;
+        
+        // 1. 重写绝对 URL (http:// 或 https://)
+        rewrittenHtml = rewrittenHtml.replace(
+          /(href|src|action|data)=["'](https?:\/\/[^"']+)["']/gi,
+          (match, attr, originalUrl) => {
+            return `${attr}="${url.origin}/${encodeURIComponent(originalUrl)}"`;
+          }
+        );
+        
+        // 2. 重写协议相对 URL (//example.com)
+        rewrittenHtml = rewrittenHtml.replace(
+          /(href|src|action|data)=["'](\/\/[^"']+)["']/gi,
+          (match, attr, originalUrl) => {
+            return `${attr}="${url.origin}/${encodeURIComponent('https:' + originalUrl)}"`;
+          }
+        );
+        
+        // 3. 重写根相对路径 (/path/to/resource)
+        rewrittenHtml = rewrittenHtml.replace(
+          /(href|src|action|data)=["'](\/[^/"'][^"']*)["']/gi,
+          (match, attr, path) => {
+            const absoluteUrl = `${targetOrigin}${path}`;
             return `${attr}="${url.origin}/${encodeURIComponent(absoluteUrl)}"`;
-          });
+          }
+        );
+        
+        // 4. 注入 base 标签，确保相对路径正确解析
+        if (!rewrittenHtml.includes('<base')) {
+          rewrittenHtml = rewrittenHtml.replace(
+            /<head>/i,
+            `<head>\n<base href="${url.origin}/${encodeURIComponent(targetOrigin)}/">`
+          );
+        }
         
         body = rewrittenHtml;
       } catch (e) {

@@ -107,6 +107,12 @@ export async function onRequest(context) {
     // 创建新的响应头
     const responseHeaders = new Headers(response.headers);
     
+    // 移除可能导致页面无法加载的安全头
+    responseHeaders.delete('X-Frame-Options');
+    responseHeaders.delete('Content-Security-Policy');
+    responseHeaders.delete('Content-Security-Policy-Report-Only');
+    responseHeaders.delete('X-Content-Type-Options');
+    
     // 添加 CORS 支持
     responseHeaders.set('Access-Control-Allow-Origin', '*');
     responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
@@ -146,8 +152,42 @@ export async function onRequest(context) {
       }
     }
     
+    // 处理 HTML 内容，重写链接
+    let body = response.body;
+    if (contentType.includes('text/html')) {
+      try {
+        const text = await response.text();
+        const targetOrigin = new URL(targetUrlStr).origin;
+        
+        // 重写 HTML 中的链接，使其通过代理
+        const rewrittenHtml = text
+          // 重写绝对路径 href 和 src
+          .replace(/(href|src|action)=["']https?:\/\/[^"']+["']/gi, (match) => {
+            const urlMatch = match.match(/(href|src|action)=["'](https?:\/\/[^"']+)["']/i);
+            if (urlMatch) {
+              const attr = urlMatch[1];
+              const originalUrl = urlMatch[2];
+              return `${attr}="${url.origin}/${encodeURIComponent(originalUrl)}"`;
+            }
+            return match;
+          })
+          // 重写相对路径
+          .replace(/(href|src|action)=["']\/([^"']*)["']/gi, (match, attr, path) => {
+            if (path.startsWith('/')) return match; // 已经是绝对路径
+            const absoluteUrl = `${targetOrigin}/${path}`;
+            return `${attr}="${url.origin}/${encodeURIComponent(absoluteUrl)}"`;
+          });
+        
+        body = rewrittenHtml;
+      } catch (e) {
+        console.error('[HTML Rewrite Error]', e);
+        // 如果重写失败，使用原始 body
+        body = response.body;
+      }
+    }
+    
     // 返回响应（流式传输）
-    return new Response(response.body, {
+    return new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders
